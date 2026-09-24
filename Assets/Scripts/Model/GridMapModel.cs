@@ -1,0 +1,227 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+public class BaseNode
+{
+    public int x;
+    public int y;
+    public bool isWalkable;
+    public int occupant;//占用者
+}
+
+
+public interface IGridMapModel : IModel
+{
+    int XSize { get; }//地图宽度
+    int YSize { get; }//地图高度
+    float CellSize { get; }//格子大小
+    int Index(int x, int y);//获取节点索引
+    void Apply(GridMapAsset gridMapAsset);//应用地图资产,初始化使用
+    BaseNode GetNode(int x, int y);//获取节点
+    BaseNode GetNode(Vector3 worldPos);//获取节点
+    BaseNode[] GetAllNodes();//获取所有节点
+    bool isWalkable(int x, int y);//判断是否可走
+    bool TryClaim(int x, int y, int occupantid);//尝试占用,占领成功返回true
+    void Claim(int x, int y, int occupantid);//占用
+    bool isClaimed(int x, int y);//判断是否已被占用
+    void Release(int x, int y);//释放占用
+    bool WorldToGrid(Vector3 worldPos, out int x, out int y);//世界坐标转换为网格坐标
+    Vector3 GridToWorld(int x, int y);//网格坐标转换为世界坐标
+}
+
+
+
+public class GridMapModel : IGridMapModel
+{
+    private Dictionary<int, BaseNode> _nodes = new Dictionary<int, BaseNode>();//节点字典
+    private GridMapAsset _gridMapAsset;//地图资产
+    public int XSize => _gridMapAsset?._xSize ?? 0;
+    public int YSize => _gridMapAsset?._ySize ?? 0;
+    public float CellSize => _gridMapAsset?._cellSize ?? 0;
+    public IAchitecture GetArchitecture() => mobaTest.Interface;
+
+    public void SetArchitecture(IAchitecture architecture) { }
+
+    public void Init() { }
+
+    /// <summary>
+    /// 获取节点索引
+    /// </summary>
+    /// <param name="x"></param>
+    /// <param name="y"></param>
+    /// <returns></returns>
+    public int Index(int x, int y)
+    {
+        if (_gridMapAsset == null) return -1;
+        return _gridMapAsset.Index(x, y);
+    }
+
+    /// <summary>
+    /// 应用地图资产,初始化使用
+    /// </summary>
+    /// <param name="gridMapAsset"></param>
+    public void Apply(GridMapAsset gridMapAsset)
+    {
+        _gridMapAsset = gridMapAsset;
+        //清空节点字典
+        _nodes.Clear();
+        if (_gridMapAsset == null)
+        {
+            Debug.LogError($"GridMapModel:Apply 传入的资产为空");
+            return;
+        }
+        //初始化节点字典
+        for (int x = 0; x < XSize; x++)
+        {
+            for (int y = 0; y < YSize; y++)
+            {
+                _nodes[_gridMapAsset.Index(x, y)] = new BaseNode
+                {
+                    x = x,
+                    y = y,
+                    isWalkable = _gridMapAsset.isWalkable(x, y),
+                    occupant = 0,
+                };
+            }
+        }
+    }
+
+
+    /// <summary>
+    /// 获取节点
+    /// </summary>
+    /// <param name="x"></param>
+    /// <param name="y"></param>
+    /// <returns></returns>
+    public BaseNode GetNode(int x, int y)
+    {
+        if (_gridMapAsset == null || !_gridMapAsset.inbounds(x, y)) return null;
+        if (!_nodes.TryGetValue(_gridMapAsset.Index(x, y), out var node)) return null;
+        return node;
+    }
+
+    /// <summary>
+    /// 获取节点
+    /// </summary>
+    /// <param name="worldPos"></param>
+    /// <returns></returns>
+    public BaseNode GetNode(Vector3 worldPos)
+    {
+        int x, y;
+        if (!WorldToGrid(worldPos, out x, out y)) return null;
+        return GetNode(x, y);
+    }
+
+    /// <summary>
+    /// 获取所有节点
+    /// </summary>
+    /// <returns></returns>
+    public BaseNode[] GetAllNodes()
+    {
+        var allNodes = new BaseNode[XSize * YSize];
+        for (int x = 0; x < XSize; x++)
+        {
+            for (int y = 0; y < YSize; y++)
+            {
+                allNodes[x * YSize + y] = GetNode(x, y);
+            }
+        }
+        return allNodes;
+    }
+
+    /// <summary>
+    /// 尝试占用,占领成功返回true
+    /// </summary>
+    /// <param name="x"></param>
+    /// <param name="y"></param>
+    /// <param name="occupantid"></param>
+    /// <returns></returns>
+    public bool TryClaim(int x, int y, int occupantid)
+    {
+        var node = GetNode(x, y);
+        if (node == null || !node.isWalkable || node.occupant != 0) return false;
+        //占用占用者,isWalkable 只表示地形,占用不修改它
+        node.occupant = occupantid;
+        return true;
+    }
+
+    /// <summary>
+    /// 占用
+    /// </summary>
+    /// <param name="x"></param>
+    /// <param name="y"></param>
+    /// <param name="occupantid"></param>
+    public void Claim(int x, int y, int occupantid)
+    {
+        TryClaim(x, y, occupantid);
+    }
+
+    /// <summary>
+    /// 判断是否已被占用者占用
+    /// </summary>
+    /// <param name="x"></param>
+    /// <param name="y"></param>
+    /// <returns></returns>
+    public bool isClaimed(int x, int y)
+    {
+        return GetNode(x, y)?.occupant != 0;
+    }
+
+    /// <summary>
+    /// 判断是否可走
+    /// </summary>
+    /// <param name="x"></param>
+    /// <param name="y"></param>
+    /// <returns></returns>
+    public bool isWalkable(int x, int y)
+    {
+        return GetNode(x, y)?.isWalkable ?? false;
+    }
+
+    /// <summary>
+    /// 释放占用
+    /// </summary>
+    /// <param name="x"></param>
+    /// <param name="y"></param>
+    public void Release(int x, int y)
+    {
+        var node = GetNode(x, y);
+        if (node == null || node.occupant == 0) return;
+        //释放占用者
+        node.occupant = 0;
+    }
+
+    /// <summary>
+    /// 世界坐标转换为网格坐标
+    /// </summary>
+    /// <param name="worldPos">世界坐标</param>
+    /// <param name="x"></param>
+    /// <param name="y"></param>
+    /// <returns></returns>
+    public bool WorldToGrid(Vector3 worldPos, out int x, out int y)
+    {
+        if (_gridMapAsset == null)
+        {
+            x = -1;
+            y = -1;
+            return false;
+        }
+        x = Mathf.FloorToInt((worldPos.x - _gridMapAsset._origin.x) / _gridMapAsset._cellSize);
+        y = Mathf.FloorToInt((worldPos.z - _gridMapAsset._origin.z) / _gridMapAsset._cellSize);
+        return x >= 0 && x < XSize && y >= 0 && y < YSize;
+    }
+
+    /// <summary>
+    /// 网格坐标转换为世界坐标,返回格子中心
+    /// </summary>
+    /// <param name="x"></param>
+    /// <param name="y"></param>
+    /// <returns>世界坐标</returns>
+    public Vector3 GridToWorld(int x, int y)
+    {
+        return new Vector3(
+            _gridMapAsset._origin.x + (x + 0.5f) * _gridMapAsset._cellSize,
+            0,
+            _gridMapAsset._origin.z + (y + 0.5f) * _gridMapAsset._cellSize);
+    }
+}
